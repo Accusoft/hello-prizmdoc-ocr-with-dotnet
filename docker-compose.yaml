@@ -1,0 +1,61 @@
+# This configuration brings up all the containers necessary to use OCR with PrizmDoc.
+# Once all the contains are running, the REST API can be used to OCR documents.
+version: '3.4'
+services:
+
+  mysql:
+    image: mysql:5.7
+    container_name: mysql
+    command: "--max_allowed_packet=100M --general_log=1 --general_log_file=/var/lib/mysql/mysql.log --innodb_use_native_aio=0"
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_LOG_CONSOLE: "TRUE"
+      MYSQL_DATABASE: ProcessManager
+      MYSQL_ROOT_PASSWORD: root
+    healthcheck:
+      test: "/usr/bin/mysql --user=root --password=root --execute \"SHOW DATABASES;\""
+      timeout: 10s
+      retries: 10
+
+  prizmdoc-server:
+    image: accusoft/prizmdoc-server:preview
+    pull_policy: always
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - 18681:18681
+      - 18682:18682
+    environment:
+      ACCEPT_EULA: "YES"
+
+  process-manager:
+    image: accusoft/process-manager:latest
+    pull_policy: always
+    depends_on:
+      prizmdoc-server:
+        condition: service_started
+      mysql:
+        condition: service_healthy
+    ports:
+      - 3000:3000
+      - 3001:3001
+    environment:
+      DATABASE_CONNECTION_STRING: mysql://root:root@mysql:3306/ProcessManager
+      PRIZMDOC_SERVER_URL: http://prizmdoc-server:18681
+      LOG_LEVEL: info
+      ACCEPT_EULA: "YES"
+
+  worker:
+    image: accusoft/ocr-reader-worker:latest
+    pull_policy: always
+    depends_on:
+      process-manager:
+        condition: service_started
+    ports:
+      - 4000:4000
+    environment:
+      PROCESS_MANAGER_INTERNAL_URL: http://process-manager:3001
+      WORKFILE_SERVICE_URL: http://prizmdoc-server:18681/PCCIS/V1/WorkFile
+      ACCEPT_EULA: "YES"
